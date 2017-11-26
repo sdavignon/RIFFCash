@@ -1,161 +1,284 @@
 Release Process
 ====================
 
-* * *
+Before every release candidate:
 
-###update (commit) version in sources
+* Update translations (ping wumpus on IRC) see [translation_process.md](https://github.com/bitcoin/bitcoin/blob/master/doc/translation_process.md#synchronising-translations).
 
+* Update manpages, see [gen-manpages.sh](https://github.com/riffcash-project/riffcash/blob/master/contrib/devtools/README.md#gen-manpagessh).
 
-	riffcash-qt.pro
-	contrib/verifysfbinaries/verify.sh
-	doc/README*
-	share/setup.nsi
-	src/clientversion.h (change CLIENT_VERSION_IS_RELEASE to true)
+Before every minor and major release:
 
-###tag version in git
+* Update [bips.md](bips.md) to account for changes since the last release.
+* Update version in `configure.ac` (don't forget to set `CLIENT_VERSION_IS_RELEASE` to `true`)
+* Write release notes (see below)
+* Update `src/chainparams.cpp` nMinimumChainWork with information from the getblockchaininfo rpc.
+* Update `src/chainparams.cpp` defaultAssumeValid  with information from the getblockhash rpc.
+  - The selected value must not be orphaned so it may be useful to set the value two blocks back from the tip.
+  - Testnet should be set some tens of thousands back from the tip due to reorgs there.
+  - This update should be reviewed with a reindex-chainstate with assumevalid=0 to catch any defect
+     that causes rejection of blocks in the past history.
 
-	git tag -a v0.8.0
+Before every major release:
 
-###write release notes. git shortlog helps a lot, for example:
+* Update hardcoded [seeds](/contrib/seeds/README.md), see [this pull request](https://github.com/bitcoin/bitcoin/pull/7415) for an example.
+* Update [`BLOCK_CHAIN_SIZE`](/src/qt/intro.cpp) to the current size plus some overhead.
+* Update `src/chainparams.cpp` chainTxData with statistics about the transaction count and rate.
+* Update version of `contrib/gitian-descriptors/*.yml`: usually one'd want to do this on master after branching off the release - but be sure to at least do it before a new major release
 
-	git shortlog --no-merges v0.7.2..v0.8.0
+### First time / New builders
 
-* * *
+If you're using the automated script (found in [contrib/gitian-build.sh](/contrib/gitian-build.sh)), then at this point you should run it with the "--setup" command. Otherwise ignore this.
 
-##perform gitian builds
+Check out the source code in the following directory hierarchy.
 
- From a directory containing the riffcash source, gitian-builder and gitian.sigs
-  
-	export SIGNER=(your gitian key, ie bluematt, sipa, etc)
-	export VERSION=0.8.0
-	cd ./gitian-builder
+    cd /path/to/your/toplevel/build
+    git clone https://github.com/riffcash-project/gitian.sigs.ltc.git
+    git clone https://github.com/riffcash-project/riffcash-detached-sigs.git
+    git clone https://github.com/devrandom/gitian-builder.git
+    git clone https://github.com/riffcash-project/riffcash.git
 
- Fetch and build inputs: (first time, or when dependency versions change)
+### riffcash maintainers/release engineers, suggestion for writing release notes
 
-	mkdir -p inputs; cd inputs/
-	wget 'http://miniupnp.free.fr/files/download.php?file=miniupnpc-1.6.tar.gz' -O miniupnpc-1.6.tar.gz
-	wget 'http://www.openssl.org/source/openssl-1.0.1c.tar.gz'
-	wget 'http://download.oracle.com/berkeley-db/db-4.8.30.NC.tar.gz'
-	wget 'http://zlib.net/zlib-1.2.6.tar.gz'
-	wget 'ftp://ftp.simplesystems.org/pub/libpng/png/src/libpng-1.5.9.tar.gz'
-	wget 'http://fukuchi.org/works/qrencode/qrencode-3.2.0.tar.bz2'
-	wget 'http://downloads.sourceforge.net/project/boost/boost/1.50.0/boost_1_50_0.tar.bz2'
-	wget 'http://releases.qt-project.org/qt4/source/qt-everywhere-opensource-src-4.8.3.tar.gz'
-	cd ..
-	./bin/gbuild ../riffcash/contrib/gitian-descriptors/boost-win32.yml
-	mv build/out/boost-win32-1.50.0-gitian2.zip inputs/
-	./bin/gbuild ../riffcash/contrib/gitian-descriptors/qt-win32.yml
-	mv build/out/qt-win32-4.8.3-gitian-r1.zip inputs/
-	./bin/gbuild ../riffcash/contrib/gitian-descriptors/deps-win32.yml
-	mv build/out/riffcash-deps-0.0.5.zip inputs/
+Write release notes. git shortlog helps a lot, for example:
 
- Build riffcashd and riffcash-qt on Linux32, Linux64, and Win32:
-  
-	./bin/gbuild --commit riffcash=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian.yml
-	./bin/gsign --signer $SIGNER --release ${VERSION} --destination ../gitian.sigs/ ../riffcash/contrib/gitian-descriptors/gitian.yml
-	pushd build/out
-	zip -r riffcash-${VERSION}-linux-gitian.zip *
-	mv riffcash-${VERSION}-linux-gitian.zip ../../
-	popd
-	./bin/gbuild --commit riffcash=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-win32.yml
-	./bin/gsign --signer $SIGNER --release ${VERSION}-win32 --destination ../gitian.sigs/ ../riffcash/contrib/gitian-descriptors/gitian-win32.yml
-	pushd build/out
-	zip -r riffcash-${VERSION}-win32-gitian.zip *
-	mv riffcash-${VERSION}-win32-gitian.zip ../../
-	popd
+    git shortlog --no-merges v(current version, e.g. 0.7.2)..v(new version, e.g. 0.8.0)
 
-  Build output expected:
+(or ping @wumpus on IRC, he has specific tooling to generate the list of merged pulls
+and sort them into categories based on labels)
 
-  1. linux 32-bit and 64-bit binaries + source (riffcash-${VERSION}-linux-gitian.zip)
-  2. windows 32-bit binary, installer + source (riffcash-${VERSION}-win32-gitian.zip)
-  3. Gitian signatures (in gitian.sigs/${VERSION}[-win32]/(your gitian key)/
+Generate list of authors:
 
-repackage gitian builds for release as stand-alone zip/tar/installer exe
+    git log --format='%aN' "$*" | sort -ui | sed -e 's/^/- /'
 
-**Linux .tar.gz:**
+Tag version (or release candidate) in git
 
-	unzip riffcash-${VERSION}-linux-gitian.zip -d riffcash-${VERSION}-linux
-	tar czvf riffcash-${VERSION}-linux.tar.gz riffcash-${VERSION}-linux
-	rm -rf riffcash-${VERSION}-linux
+    git tag -s v(new version, e.g. 0.8.0)
 
-**Windows .zip and setup.exe:**
+### Setup and perform Gitian builds
 
-	unzip riffcash-${VERSION}-win32-gitian.zip -d riffcash-${VERSION}-win32
-	mv riffcash-${VERSION}-win32/riffcash-*-setup.exe .
-	zip -r riffcash-${VERSION}-win32.zip bitcoin-${VERSION}-win32
-	rm -rf riffcash-${VERSION}-win32
+If you're using the automated script (found in [contrib/gitian-build.sh](/contrib/gitian-build.sh)), then at this point you should run it with the "--build" command. Otherwise ignore this.
 
-**Perform Mac build:**
+Setup Gitian descriptors:
 
-  OSX binaries are created by Gavin Andresen on a 32-bit, OSX 10.6 machine.
+    pushd ./riffcash
+    export SIGNER=(your Gitian key, ie bluematt, sipa, etc)
+    export VERSION=(new version, e.g. 0.8.0)
+    git fetch
+    git checkout v${VERSION}
+    popd
 
-	qmake RELEASE=1 USE_UPNP=1 USE_QRCODE=1 riffcash-qt.pro
-	make
-	export QTDIR=/opt/local/share/qt4  # needed to find translations/qt_*.qm files
-	T=$(contrib/qt_translations.py $QTDIR/translations src/qt/locale)
-	python2.7 share/qt/clean_mac_info_plist.py
-	python2.7 contrib/macdeploy/macdeployqtplus Bitcoin-Qt.app -add-qt-tr $T -dmg -fancy contrib/macdeploy/fancy.plist
+Ensure your gitian.sigs.ltc are up-to-date if you wish to gverify your builds against other Gitian signatures.
 
- Build output expected: Bitcoin-Qt.dmg
+    pushd ./gitian.sigs.ltc
+    git pull
+    popd
 
-###Next steps:
+Ensure gitian-builder is up-to-date:
 
-* Code-sign Windows -setup.exe (in a Windows virtual machine) and
-  OSX Bitcoin-Qt.app (Note: only Gavin has the code-signing keys currently)
+    pushd ./gitian-builder
+    git pull
+    popd
 
-* upload builds to SourceForge
+### Fetch and create inputs: (first time, or when dependency versions change)
 
-* create SHA256SUMS for builds, and PGP-sign it
+    pushd ./gitian-builder
+    mkdir -p inputs
+    wget -P inputs https://bitcoincore.org/cfields/osslsigncode-Backports-to-1.7.1.patch
+    wget -P inputs http://downloads.sourceforge.net/project/osslsigncode/osslsigncode/osslsigncode-1.7.1.tar.gz
+    popd
 
-* update riffcash.org version
-  make sure all OS download links go to the right versions
+Create the OS X SDK tarball, see the [OS X readme](README_osx.md) for details, and copy it into the inputs directory.
 
-* update forum version
+### Optional: Seed the Gitian sources cache and offline git repositories
 
-* update wiki download links
+By default, Gitian will fetch source files as needed. To cache them ahead of time:
 
-* update wiki changelog: [https://en.riffcash.it/wiki/Changelog](https://en.bitcoin.it/wiki/Changelog)
+    pushd ./gitian-builder
+    make -C ../riffcash/depends download SOURCES_PATH=`pwd`/cache/common
+    popd
 
-Commit your signature to gitian.sigs:
+Only missing files will be fetched, so this is safe to re-run for each build.
 
-	pushd gitian.sigs
-	git add ${VERSION}/${SIGNER}
-	git add ${VERSION}-win32/${SIGNER}
-	git commit -a
-	git push  # Assuming you can push to the gitian.sigs tree
-	popd
+NOTE: Offline builds must use the --url flag to ensure Gitian fetches only from local URLs. For example:
 
--------------------------------------------------------------------------
+    pushd ./gitian-builder
+    ./bin/gbuild --url riffcash=/path/to/riffcash,signature=/path/to/sigs {rest of arguments}
+    popd
 
-### After 3 or more people have gitian-built, repackage gitian-signed zips:
+The gbuild invocations below <b>DO NOT DO THIS</b> by default.
 
-From a directory containing riffcash source, gitian.sigs and gitian zips
+### Build and sign riffcash Core for Linux, Windows, and OS X:
 
-	export VERSION=0.5.1
-	mkdir riffcash-${VERSION}-linux-gitian
-	pushd riffcash-${VERSION}-linux-gitian
-	unzip ../riffcash-${VERSION}-linux-gitian.zip
-	mkdir gitian
-	cp ../riffcash/contrib/gitian-downloader/*.pgp ./gitian/
-	for signer in $(ls ../gitian.sigs/${VERSION}/); do
-	 cp ../gitian.sigs/${VERSION}/${signer}/riffcash-build.assert ./gitian/${signer}-build.assert
-	 cp ../gitian.sigs/${VERSION}/${signer}/riffcash-build.assert.sig ./gitian/${signer}-build.assert.sig
-	done
-	zip -r riffcash-${VERSION}-linux-gitian.zip *
-	cp riffcash-${VERSION}-linux-gitian.zip ../
-	popd
-	mkdir riffcash-${VERSION}-win32-gitian
-	pushd riffcash-${VERSION}-win32-gitian
-	unzip ../riffcash-${VERSION}-win32-gitian.zip
-	mkdir gitian
-	cp ../riffcash/contrib/gitian-downloader/*.pgp ./gitian/
-	for signer in $(ls ../gitian.sigs/${VERSION}-win32/); do
-	 cp ../gitian.sigs/${VERSION}-win32/${signer}/riffcash-build.assert ./gitian/${signer}-build.assert
-	 cp ../gitian.sigs/${VERSION}-win32/${signer}/riffcash-build.assert.sig ./gitian/${signer}-build.assert.sig
-	done
-	zip -r riffcash-${VERSION}-win32-gitian.zip *
-	cp riffcash-${VERSION}-win32-gitian.zip ../
-	popd
+    pushd ./gitian-builder
+    ./bin/gbuild --num-make 2 --memory 3000 --commit riffcash=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-linux.yml
+    ./bin/gsign --signer $SIGNER --release ${VERSION}-linux --destination ../gitian.sigs.ltc/ ../riffcash/contrib/gitian-descriptors/gitian-linux.yml
+    mv build/out/riffcash-*.tar.gz build/out/src/riffcash-*.tar.gz ../
 
-- Upload gitian zips to SourceForge
-- Celebrate 
+    ./bin/gbuild --num-make 2 --memory 3000 --commit riffcash=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-win.yml
+    ./bin/gsign --signer $SIGNER --release ${VERSION}-win-unsigned --destination ../gitian.sigs.ltc/ ../riffcash/contrib/gitian-descriptors/gitian-win.yml
+    mv build/out/riffcash-*-win-unsigned.tar.gz inputs/riffcash-win-unsigned.tar.gz
+    mv build/out/riffcash-*.zip build/out/riffcash-*.exe ../
+
+    ./bin/gbuild --num-make 2 --memory 3000 --commit riffcash=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-osx.yml
+    ./bin/gsign --signer $SIGNER --release ${VERSION}-osx-unsigned --destination ../gitian.sigs.ltc/ ../riffcash/contrib/gitian-descriptors/gitian-osx.yml
+    mv build/out/riffcash-*-osx-unsigned.tar.gz inputs/riffcash-osx-unsigned.tar.gz
+    mv build/out/riffcash-*.tar.gz build/out/riffcash-*.dmg ../
+    popd
+
+Build output expected:
+
+  1. source tarball (`riffcash-${VERSION}.tar.gz`)
+  2. linux 32-bit and 64-bit dist tarballs (`riffcash-${VERSION}-linux[32|64].tar.gz`)
+  3. windows 32-bit and 64-bit unsigned installers and dist zips (`riffcash-${VERSION}-win[32|64]-setup-unsigned.exe`, `riffcash-${VERSION}-win[32|64].zip`)
+  4. OS X unsigned installer and dist tarball (`riffcash-${VERSION}-osx-unsigned.dmg`, `riffcash-${VERSION}-osx64.tar.gz`)
+  5. Gitian signatures (in `gitian.sigs.ltc/${VERSION}-<linux|{win,osx}-unsigned>/(your Gitian key)/`)
+
+### Verify other gitian builders signatures to your own. (Optional)
+
+Add other gitian builders keys to your gpg keyring, and/or refresh keys.
+
+    gpg --import riffcash/contrib/gitian-keys/*.pgp
+    gpg --refresh-keys
+
+Verify the signatures
+
+    pushd ./gitian-builder
+    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-linux ../riffcash/contrib/gitian-descriptors/gitian-linux.yml
+    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-win-unsigned ../riffcash/contrib/gitian-descriptors/gitian-win.yml
+    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-osx-unsigned ../riffcash/contrib/gitian-descriptors/gitian-osx.yml
+    popd
+
+### Next steps:
+
+Commit your signature to gitian.sigs.ltc:
+
+    pushd gitian.sigs.ltc
+    git add ${VERSION}-linux/${SIGNER}
+    git add ${VERSION}-win-unsigned/${SIGNER}
+    git add ${VERSION}-osx-unsigned/${SIGNER}
+    git commit -a
+    git push  # Assuming you can push to the gitian.sigs.ltc tree
+    popd
+
+Codesigner only: Create Windows/OS X detached signatures:
+- Only one person handles codesigning. Everyone else should skip to the next step.
+- Only once the Windows/OS X builds each have 3 matching signatures may they be signed with their respective release keys.
+
+Codesigner only: Sign the osx binary:
+
+    transfer riffcash-osx-unsigned.tar.gz to osx for signing
+    tar xf riffcash-osx-unsigned.tar.gz
+    ./detached-sig-create.sh -s "Key ID"
+    Enter the keychain password and authorize the signature
+    Move signature-osx.tar.gz back to the gitian host
+
+Codesigner only: Sign the windows binaries:
+
+    tar xf riffcash-win-unsigned.tar.gz
+    ./detached-sig-create.sh -key /path/to/codesign.key
+    Enter the passphrase for the key when prompted
+    signature-win.tar.gz will be created
+
+Codesigner only: Commit the detached codesign payloads:
+
+    cd ~/riffcash-detached-sigs
+    checkout the appropriate branch for this release series
+    rm -rf *
+    tar xf signature-osx.tar.gz
+    tar xf signature-win.tar.gz
+    git add -a
+    git commit -m "point to ${VERSION}"
+    git tag -s v${VERSION} HEAD
+    git push the current branch and new tag
+
+Non-codesigners: wait for Windows/OS X detached signatures:
+
+- Once the Windows/OS X builds each have 3 matching signatures, they will be signed with their respective release keys.
+- Detached signatures will then be committed to the [riffcash-detached-sigs](https://github.com/riffcash-project/riffcash-detached-sigs) repository, which can be combined with the unsigned apps to create signed binaries.
+
+Create (and optionally verify) the signed OS X binary:
+
+    pushd ./gitian-builder
+    ./bin/gbuild -i --commit signature=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-osx-signer.yml
+    ./bin/gsign --signer $SIGNER --release ${VERSION}-osx-signed --destination ../gitian.sigs.ltc/ ../riffcash/contrib/gitian-descriptors/gitian-osx-signer.yml
+    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-osx-signed ../riffcash/contrib/gitian-descriptors/gitian-osx-signer.yml
+    mv build/out/riffcash-osx-signed.dmg ../riffcash-${VERSION}-osx.dmg
+    popd
+
+Create (and optionally verify) the signed Windows binaries:
+
+    pushd ./gitian-builder
+    ./bin/gbuild -i --commit signature=v${VERSION} ../riffcash/contrib/gitian-descriptors/gitian-win-signer.yml
+    ./bin/gsign --signer $SIGNER --release ${VERSION}-win-signed --destination ../gitian.sigs.ltc/ ../riffcash/contrib/gitian-descriptors/gitian-win-signer.yml
+    ./bin/gverify -v -d ../gitian.sigs.ltc/ -r ${VERSION}-win-signed ../riffcash/contrib/gitian-descriptors/gitian-win-signer.yml
+    mv build/out/riffcash-*win64-setup.exe ../riffcash-${VERSION}-win64-setup.exe
+    mv build/out/riffcash-*win32-setup.exe ../riffcash-${VERSION}-win32-setup.exe
+    popd
+
+Commit your signature for the signed OS X/Windows binaries:
+
+    pushd gitian.sigs.ltc
+    git add ${VERSION}-osx-signed/${SIGNER}
+    git add ${VERSION}-win-signed/${SIGNER}
+    git commit -a
+    git push  # Assuming you can push to the gitian.sigs.ltc tree
+    popd
+
+### After 3 or more people have gitian-built and their results match:
+
+- Create `SHA256SUMS.asc` for the builds, and GPG-sign it:
+
+```bash
+sha256sum * > SHA256SUMS
+```
+
+The list of files should be:
+```
+riffcash-${VERSION}-aarch64-linux-gnu.tar.gz
+riffcash-${VERSION}-arm-linux-gnueabihf.tar.gz
+riffcash-${VERSION}-i686-pc-linux-gnu.tar.gz
+riffcash-${VERSION}-x86_64-linux-gnu.tar.gz
+riffcash-${VERSION}-osx64.tar.gz
+riffcash-${VERSION}-osx.dmg
+riffcash-${VERSION}.tar.gz
+riffcash-${VERSION}-win32-setup.exe
+riffcash-${VERSION}-win32.zip
+riffcash-${VERSION}-win64-setup.exe
+riffcash-${VERSION}-win64.zip
+```
+The `*-debug*` files generated by the gitian build contain debug symbols
+for troubleshooting by developers. It is assumed that anyone that is interested
+in debugging can run gitian to generate the files for themselves. To avoid
+end-user confusion about which file to pick, as well as save storage
+space *do not upload these to the riffcash.com server, nor put them in the torrent*.
+
+- GPG-sign it, delete the unsigned file:
+```
+gpg --digest-algo sha256 --clearsign SHA256SUMS # outputs SHA256SUMS.asc
+rm SHA256SUMS
+```
+(the digest algorithm is forced to sha256 to avoid confusion of the `Hash:` header that GPG adds with the SHA256 used for the files)
+Note: check that SHA256SUMS itself doesn't end up in SHA256SUMS, which is a spurious/nonsensical entry.
+
+- Upload zips and installers, as well as `SHA256SUMS.asc` from last step, to the riffcash.com server.
+
+```
+
+- Update riffcash.com version
+
+- Announce the release:
+
+  - riffcash-dev and riffcash-dev mailing list
+
+  - blog.riffcash.com blog post
+
+  - Update title of #riffcash and #riffcash-dev on Freenode IRC
+
+  - Optionally twitter, reddit /r/riffcash, ... but this will usually sort out itself
+
+  - Archive release notes for the new version to `doc/release-notes/` (branch `master` and branch of the release)
+
+  - Create a [new GitHub release](https://github.com/riffcash-project/riffcash/releases/new) with a link to the archived release notes.
+
+  - Celebrate
